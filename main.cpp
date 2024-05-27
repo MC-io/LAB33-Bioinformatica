@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <omp.h>
+#include <chrono>
 
 class NeedlemanWunschAlignment
 {
@@ -199,6 +200,103 @@ public:
         return std::make_pair(alignment_s, alignment_t);
     }
 
+    std::vector<std::pair<std::string, std::string>> get_allignments_parallel()
+    {
+        std::vector<std::vector<std::vector<std::string>>> alignments(s.size() + 1, std::vector<std::vector<std::string>>(t.size() + 1));
+        alignments[0][0].push_back("");
+        for (int i = 1; i < s.size() + 1; i++)
+        {
+            alignments[i][0].push_back("^");
+            for (int j = 1; j < i; j++)
+                alignments[i][0][0] += "^";
+        }
+        for (int i = 1; i < t.size() + 1; i++)
+        {
+            alignments[0][i].push_back("<");
+            for (int j = 1; j < i; j++)
+                alignments[0][i][0] += "<";
+        }
+
+        int rows = s.size();
+        int cols = t.size();
+
+        for (int diagonal = 0; diagonal < rows + cols - 1; diagonal++)
+        {
+            int start_row = std::max(0, diagonal - cols + 1);
+            int start_col = std::min(diagonal, cols - 1);
+
+            int diag_len = std::min(rows - start_row - 1, start_col) + 1;
+
+            #pragma omp parallel for
+            for (int k = 0; k < diag_len; k++) {
+                int i = start_row + 1 + k, j = start_col + 1 - k;
+                if (up_matrix[i][j])
+                {
+                    auto more_aligns = alignments[i - 1][j];
+                    for (auto &a : more_aligns)
+                    {
+                        a += '^';
+                    }
+                    alignments[i][j].insert(alignments[i][j].end(), more_aligns.begin(), more_aligns.end());
+                }
+                if (left_matrix[i][j])
+                {
+                    auto more_aligns = alignments[i][j - 1];
+                     for (auto &a : more_aligns)
+                    {
+                        a += '<';
+                    }
+                    alignments[i][j].insert(alignments[i][j].end(), more_aligns.begin(), more_aligns.end());
+                }
+                if (diag_matrix[i][j])
+                {
+                    auto more_aligns = alignments[i - 1][j - 1];
+                     for (auto &a : more_aligns)
+                    {
+                        a += '\\';
+                    }
+                    alignments[i][j].insert(alignments[i][j].end(), more_aligns.begin(), more_aligns.end());
+                }
+            }
+        }
+
+        auto all_alignments = alignments[s.size()][t.size()];
+        std::vector<std::pair<std::string, std::string>> res;
+
+        for (int i = 0; i < all_alignments.size(); i++)
+        {
+            int x = s.size(), y = t.size();
+            std::string s_suffix;
+            std::string t_suffix;
+            int j = all_alignments[i].size() - 1;
+            while (x > 0 || y > 0)
+            {
+                if (all_alignments[i][j] == '<')
+                {
+                    s_suffix.insert(0, 1, '_');
+                    t_suffix.insert(0, 1, this->t[y - 1]);
+                    y--;
+                }
+                else if (all_alignments[i][j] == '^')
+                {
+                    s_suffix.insert(0, 1, this->s[x - 1]);
+                    t_suffix.insert(0, 1, '_');
+                    x--;
+                }
+                else 
+                {
+                    s_suffix.insert(0, 1, this->s[x - 1]);
+                    t_suffix.insert(0, 1, this->t[y - 1]);
+                    x--;
+                    y--;
+                }
+                j--;
+            }
+            res.push_back(std::make_pair(s_suffix, t_suffix));
+        }
+        return res;
+    }
+
     std::vector<std::pair<std::string, std::string>> get_allignments(int i, int j)
     {
         std::vector<std::pair<std::string, std::string>> allignments;
@@ -312,64 +410,64 @@ std::pair<std::string, std::string> get_sequences_from_file(std::string filename
 int main()
 {
     srand(time(NULL));
-    std::string s = get_random_dna_sequence(20);
-    std::string t = get_random_dna_sequence(20);
+    std::string s = get_random_dna_sequence(5000);
+    std::string t = get_random_dna_sequence(5000);
 
     std::ofstream file("result.txt");
-
+    const auto start{std::chrono::steady_clock::now()};
     NeedlemanWunschAlignment alineacion(s, t);
+    const auto end{std::chrono::steady_clock::now()};
+    const std::chrono::duration<double> elapsed_seconds{end - start};
+    std::cout << elapsed_seconds.count() << '\n';
 
-    std::vector<std::vector<int>> score_matrix = alineacion.get_score_matrix();
-    std::vector<std::pair<std::string, std::string>> found_alignments = alineacion.get_allignments();
+    //std::vector<std::vector<int>> score_matrix = alineacion.get_score_matrix();
+    //std::vector<std::pair<std::string, std::string>> found_alignments = alineacion.get_allignments_parallel();
 
 
     file << "Resultados para las cadenas:\n";
     file << "S: " << s << '\n';
     file << "T: " << t << "\n\n";
-
     file << "Score: " << alineacion.get_score() << '\n';
-    file << "Matriz de Scores\n";
+    // file << "Matriz de Scores\n";
 
-    file << " \t-\t\t";
-    for (int i = 0; i < t.size(); i++)
-    {
-        file << t[i] << "\t\t";
-    }
+    // file << " \t-\t\t";
+    // for (int i = 0; i < t.size(); i++)
+    // {
+    //     file << t[i] << "\t\t";
+    // }
 
-    file << '\n';
-    for (int i = 0; i < score_matrix.size(); i++)
-    {
-         std::cout << "que\n";
+    // file << '\n';
+    // for (int i = 0; i < score_matrix.size(); i++)
+    // {
+    //     if (i == 0) file << "-";
+    //     else file << s[i - 1];
+    //     for (int j = 0; j < score_matrix[i].size(); j++)
+    //     {
+    //         if (alineacion.diag_matrix[i][j]) file << "\\\t";
+    //         else file << "\t";
+    //         if (alineacion.up_matrix[i][j]) file << "^\t";
+    //         else file << "\t";
+    //     }
+    //     file << '\n';
 
-        if (i == 0) file << "-";
-        else file << s[i - 1];
-        for (int j = 0; j < score_matrix[i].size(); j++)
-        {
-            if (alineacion.diag_matrix[i][j]) file << "\\\t";
-            else file << "\t";
-            if (alineacion.up_matrix[i][j]) file << "^\t";
-            else file << "\t";
-        }
-        file << '\n';
+    //     for (int j = 0; j < score_matrix[i].size(); j++)
+    //     {
+    //         if (alineacion.left_matrix[i][j]) file << "<\t";
+    //         else file << "\t";
+    //         file << score_matrix[i][j] << '\t';
+    //     }
+    //     file << '\n';
+    // }
+    // file << '\n';
 
-        for (int j = 0; j < score_matrix[i].size(); j++)
-        {
-            if (alineacion.left_matrix[i][j]) file << "<\t";
-            else file << "\t";
-            file << score_matrix[i][j] << '\t';
-        }
-        file << '\n';
-    }
-    file << '\n';
-
-    file << "Cantidad de alineamientos producidos: " << alineacion.optimal_allignments_num() << '\n';
-    file << "Alineamientos generados:\n";
+    // file << "Cantidad de alineamientos producidos: " << alineacion.optimal_allignments_num() << '\n';
+    // file << "Alineamientos generados:\n";
 
 
-    for (int i = 0; i < found_alignments.size(); i++)
-    {
-        file << found_alignments[i].first << '\n' << found_alignments[i].second << "\n\n";
-    }
+    // for (int i = 0; i < found_alignments.size(); i++)
+    // {
+    //     file << found_alignments[i].first << '\n' << found_alignments[i].second << "\n\n";
+    // }
 
     file.close();
 
